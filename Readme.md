@@ -5,6 +5,17 @@ This repo demonstrates some of the capabilities of GKE Autopilot. Please note th
 Demo uses the global external loadbalancer class.
 First, ensure that Gateway API is enabled on the cluster by following [these](https://cloud.google.com/kubernetes-engine/docs/how-to/deploying-gateways#enable-gateway) instructions.
 
+
+## Verify the nodes in the cluster
+```sh
+kubectl get nodes
+```
+Get the node type provisioned
+```sh
+kubectl get nodes -o json|jq -Cjr '.items[] | .metadata.name," ",.metadata.labels."beta.kubernetes.io/instance-type"," ",.metadata.labels."beta.kubernetes.io/arch", "\n"'|sort -k3 -r
+```
+Without any workloads deployed, the cluster will likely be a very small one with a node-pool of size 1. By default nodes will be of the smaller *General* compute-type which uses E2 machine types.
+
 ## Deploy simple application
 The application consists of the following:
 1. An ngnix deployment.
@@ -19,14 +30,6 @@ Deploy the application by running
 kubectl apply -f k8s/step1
 ```
 
-## Verify the nodes in the cluster
-```sh
-kubectl get nodes
-```
-Get the node type provisioned
-```sh
-kubectl get nodes -o json|jq -Cjr '.items[] | .metadata.name," ",.metadata.labels."beta.kubernetes.io/instance-type"," ",.metadata.labels."beta.kubernetes.io/arch", "\n"'|sort -k3 -r
-```
 
 ## Autopilot resource requests
 In autopilot you are billed based on the resources (like CPU, memory and ephemeral storage) your pods request. There are some behaviours with respect to these requests that autopilot introduces. Some of these concepts are introduced using demos. For official documentation around this, please consult this [page](https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-resource-requests).
@@ -85,3 +88,61 @@ The resource requests and limits will be modified and applied as follows:
 ```
 
 The minimum and maximum ratios required for autopilot can be found [here](https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-resource-requests#compute-class-min-max)
+
+### Autopilot resources can only change in specific value increments
+In *k8s/step4/deployment.yaml*, we will change the total amount of CPU requested to 0.8vCPU. The amount of memory requested has to be an integer (so we will use an integer value of 2Gi).  Apply this new deployment.
+```sh
+kubectl apply -f k8s/step4/deployment.yaml
+```
+The deployment will be updated with a **warning**.
+> WARNING: autopilot-default-resources-mutator:Autopilot updated Deployment nginx/nginx-deployment: adjusted resources to meet requirements for containers [nginx] (see http://g.co/gke/autopilot-resources)
+deployment.apps/nginx-deployment configured.
+
+The resource requests and limits will be modified and applied as follows:
+```sh
+   Limits:
+      cpu:                1
+      memory:             2Gi
+    Requests:
+      cpu:                1
+      memory:             2Gi
+```
+You will notice that autopilot does not accept a value of 0.8vCPU and changes the number to 1vCPU. In fact the same will happen even if you choose a number greater than 0.75 and less 1. This is to illustrate that CPU resources must be increased in increments of 0.25 CPUs. You can read more about this [here](https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-resource-requests#min-max-requests). Please note that memory requests will always need to be integers.
+
+## Node-pool behaviour
+Autopilot will scale-up machines and add more nodes based on the requirements of your workloads. Scaling operations may take some time when new nodes needs to be added.
+
+### Scaling nodes out and up
+We will create more resource requests than a single e2-standard-4 machine type can handle by requesting 2 replicas of 3vCPUs pods. 
+```sh
+kubectl apply -f k8s/step5/deployment.yaml
+```
+Immediately after applying this (assuming that you have none or very small workloads running before the apply), you will notice that pods will be in the *pending* state for a few minutes. You can verify this by running
+```sh
+kubectl get pods -n nginx -w
+```
+After the pods are in a running state, let us check the nodes in the cluster by running
+```sh
+kubectl get nodes -o json|jq -Cjr '.items[] | .metadata.name," ",.metadata.labels."beta.kubernetes.io/instance-type"," ",.metadata.labels."beta.kubernetes.io/arch", "\n"'|sort -k3 -r
+```
+You will notice that there are atleast 2 nodes in the cluster, so autopilot scaled-out the number of instances to be able to provision your workloads. 
+
+Now, we will try scaling up nodes from the e2-standard-4 type. To do this we will ask for  9vCPU per pod. 
+```sh
+kubectl apply -f k8s/step5/deployment.yaml
+```
+Again, immediately after applying this, you will notice that new pods will be in the *pending* state for a few minutes. You can verify this by running
+```sh
+kubectl get pods -n nginx -w
+```
+Once all the new pods are in the running state (and the old pods are terminated), let us check the nodes again by running 
+```sh
+kubectl get nodes -o json|jq -Cjr '.items[] | .metadata.name," ",.metadata.labels."beta.kubernetes.io/instance-type"," ",.metadata.labels."beta.kubernetes.io/arch", "\n"'|sort -k3 -r
+```
+You will notice that there will be atleast 2 new nodes added to the clusters (and the old nodes may be removed). The new nodes will be of a larger machine type that e2-standard-4 (likely will be e2-standard-16). It is important to note that you are only paying for the resources requested by your workload pods and not number of nodes or the underlying machine type of your nodes.
+
+Let us delete the deployment by running
+```sh
+kubectl delete deploy/nginx-deploy -n nginx
+```
+You may continue to watch the nodes in your cluster. Autopilot may scale them down after a few minutes. Again, you will not be billed for these nodes that are running in the cluster.
