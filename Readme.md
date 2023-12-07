@@ -129,7 +129,7 @@ You will notice that there are atleast 2 nodes in the cluster, so autopilot scal
 
 Now, we will try scaling up nodes from the e2-standard-4 type. To do this we will ask for  9vCPU per pod. 
 ```sh
-kubectl apply -f k8s/step5/deployment.yaml
+kubectl apply -f k8s/step6/deployment.yaml
 ```
 Again, immediately after applying this, you will notice that new pods will be in the *pending* state for a few minutes. You can verify this by running
 ```sh
@@ -146,3 +146,20 @@ Let us delete the deployment by running
 kubectl delete deploy/nginx-deploy -n nginx
 ```
 You may continue to watch the nodes in your cluster. Autopilot may scale them down after a few minutes. Again, you will not be billed for these nodes that are running in the cluster.
+
+### Using different compute classes
+By default, autopilot uses machines from the *General* compute class to run your workloads. However, you can select from 3 different [compute classes](https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-compute-classes#when-to-use) (Balanced, General Purpose, Scale out), or [GPU types](https://cloud.google.com/kubernetes-engine/docs/how-to/autopilot-gpus) (nvidia-l4, nvidia-tesla-t4, nvidia-tesla-a100, nvidia-a100-80gb).
+The classes can be selected by specifying the type either using a *NodeSelector* or *NodeAffinity* field in the pod spec.
+In this step will will select compute class *Balanced* to deploy our workload.
+```sh
+kubectl apply -f k8s/step7/deployment.yaml
+```
+Again, it will take a while (approx a minute) for the pods to start *running* as Autopilot will create a node(s) from the required compute class.
+Once the pods are up and running, check the nodes that are running in the cluster.
+```sh
+kubectl get nodes -o json|jq -Cjr '.items[] | .metadata.name," ",.metadata.labels."beta.kubernetes.io/instance-type"," ",.metadata.labels."cloud.google.com/compute-class", "\n"'|sort -k3 -r
+```
+You should find atleast one node in the cluster of machine type *n2d* and with the label  *cloud.google.com/compute-class* with value *Balanced*. So autopilot automatically creates the node of the required compute class and labels it with the value expected by the workload (as defined by the nodeSelector or nodeAffinity field).
+
+*Note*: the price of resource requests that Autopilot depends on the [compute class](https://cloud.google.com/kubernetes-engine/pricing#autopilot_mode) used.
+
