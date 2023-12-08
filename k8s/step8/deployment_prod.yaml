@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  namespace: nginx
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+      env: prod
+  replicas: 2 
+  template:
+    metadata:
+      labels:
+        app: nginx
+        env: prod
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "0.5"
+        ports:
+        - containerPort: 80
+      affinity:
+        nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: "env"
+                  operator: In
+                  values:
+                  - "prod"
+      tolerations:
+      - key: env
+        operator: Equal
+        value: "prod"
+        effect: NoSchedule
+      

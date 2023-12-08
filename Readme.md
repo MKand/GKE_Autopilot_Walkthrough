@@ -1,8 +1,11 @@
 # Autopilot demo
 This repo demonstrates some of the capabilities of GKE Autopilot. Please note that this is **not** an official resource, so please refer to the documentation on GKE Autopilot on Google Cloud's official site.
 
+## Setup your autopilot cluster
+Follow the instructions [here](https://cloud.google.com/kubernetes-engine/docs/how-to/creating-an-autopilot-cluster) to set up the autopilot cluster and connect to it from your kubernetes client.
+
 ## Ensure Gateway API is installed on the cluster. 
-Demo uses the global external loadbalancer class.
+This demo uses the global external loadbalancer class.
 First, ensure that Gateway API is enabled on the cluster by following [these](https://cloud.google.com/kubernetes-engine/docs/how-to/deploying-gateways#enable-gateway) instructions.
 
 
@@ -143,7 +146,7 @@ You will notice that there will be atleast 2 new nodes added to the clusters (an
 
 Let us delete the deployment by running
 ```sh
-kubectl delete deploy/nginx-deploy -n nginx
+kubectl delete deploy/nginx-deployment -n nginx
 ```
 You may continue to watch the nodes in your cluster. Autopilot may scale them down after a few minutes. Again, you will not be billed for these nodes that are running in the cluster.
 
@@ -162,4 +165,50 @@ kubectl get nodes -o json|jq -Cjr '.items[] | .metadata.name," ",.metadata.label
 You should find atleast one node in the cluster of machine type *n2d* and with the label  *cloud.google.com/compute-class* with value *Balanced*. So autopilot automatically creates the node of the required compute class and labels it with the value expected by the workload (as defined by the nodeSelector or nodeAffinity field).
 
 *Note*: the price of resource requests that Autopilot depends on the [compute class](https://cloud.google.com/kubernetes-engine/pricing#autopilot_mode) used.
+
+## Workload seperation
+Workload seperation can be performed when you have workloads that perform different roles and shouldn't run on the same underlying machines. In this example, we will be seperating *dev* workloads from *prod* workloads on different nodes.
+
+In the example, we have 2 seperate deployments of the nginx container, one belonging to *dev* and the other prod. We want to ensure that both these sets of pods are deployed onto different nodes. 
+In order to do this, we specify the toleration on the pods that will seperate out nodes that allow *dev* pods from those that allow *prod* pods.  Then Autopilot ensures that nodes with the required *taints* are spun up and that only pods with tolerations to those taints are allowed.
+
+Looking at *k8s/step8/deployment_prod.yaml* and *k8s/step8/deployment_dev.yaml* will show you that the *prod* deployment podSpec shows a toleration for nodes with the taint "env=prod:NoSchedule" while the *dev* deployment podSpec shows a toleration for nodes with the taint "env=dev:NoSchedule". On top of this both podSpecs also specify that they must be schedule on nodes that have the labels "env=prod" and "env=dev" respectively, to ensure workload seperation. Without the latter specification, it could happen that both sets of pods are scheduled on an untainted node, should one exist in the cluster.
+
+Let's start by deleting the existing deployment.
+```sh
+kubectl delete deploy/nginx-deployment -n nginx
+```
+Let's apply the new deployments.
+```sh
+kubectl apply -f k8s/step8
+```
+Wait for all the new pods to spin up.
+After they are all in running state, let us examine the taints on the nodes in the cluster by running the following command.
+```sh
+kubectl get nodes -o json | jq '.items[] | .metadata.name," ", .spec.taints'
+```
+You should see that there are (alteast) 2 nodes with 2 different taints in the cluster as defined earlier. The output should look something like this, the actual node-names will be different.
+```sh
+"gk3-demo-autopilot-clust-nap-1l1nplkd-ab97db75-mphh"
+[
+  {
+    "effect": "NoSchedule",
+    "key": "env",
+    "value": "prod"
+  }
+]
+"gk3-demo-autopilot-clust-nap-fkequtrn-9618d805-vqwc"
+[
+  {
+    "effect": "NoSchedule",
+    "key": "env",
+    "value": "dev"
+  }
+]
+```
+Now let us verify that the pods are running on the right nodes by running.
+```sh
+kubectl get pods -n nginx -o wide
+```
+The output show a list of the pods with the names of the nodes they are running on. By cross-checking with the previous output which associated node names with the taints on them, you should be able to verify that workload seperation is indeed achieved.
 
